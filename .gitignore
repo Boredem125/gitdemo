@@ -6,3 +6,4 @@ data/
 apps/api/public/
 coverage/
 .DS_Store
+.claude/
