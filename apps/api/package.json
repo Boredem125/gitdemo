@@ -1,0 +1,17 @@
+{
+  "name": "@gitdemo/api",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "tsx watch src/index.ts",
+    "build": "echo 'implemented in workstream 2'",
+    "test": "vitest run",
+    "typecheck": "tsc -p tsconfig.json"
+  },
+  "dependencies": {
+    "@gitdemo/shared": "*",
+    "@gitdemo/analyzer": "*",
+    "@gitdemo/runner": "*"
+  }
+}
