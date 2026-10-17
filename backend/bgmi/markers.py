@@ -67,9 +67,14 @@ def detect_tags(
     region: tuple[int, int, int, int],
     T: Transform | None = None,
     town_names: set[str] | None = None,
+    words_out: list[str] | None = None,
 ) -> list[Tag]:
+    """Name tags in the map viewport. `words_out` collects every OCR'd text (used to
+    identify the map from its town labels)."""
     x0, y0, x1, y1 = region
     boxes = ocr.read(img[y0:y1, x0:x1], offset=(x0, y0), min_conf=0.55)
+    if words_out is not None:
+        words_out.extend(b.text for b in boxes)
     towns = {re.sub(r"[^a-z]", "", t.lower()) for t in (town_names or set())}
     tags: list[Tag] = []
     for b in boxes:

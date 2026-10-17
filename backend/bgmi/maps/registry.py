@@ -21,6 +21,9 @@ class MapInfo:
     size_km: int
     towns: frozenset[str] = field(default_factory=frozenset)
     image: str = ""
+    # broadcast km grid -> reference image, as fractions of the image size:
+    # u = km_x / size * scale + du, v = km_y / size * scale + dv  (fitted with SIFT)
+    display: tuple[float, float, float] = (1.0, 0.0, 0.0)
 
     @property
     def image_path(self) -> Path:
@@ -38,6 +41,7 @@ MAPS: dict[str, MapInfo] = {
             "Mylta Power, Water Town".split(", ")
         ),
         "Erangel_High_Res.png",
+        (0.984, 0.0008, -0.0022),
     ),
     "Miramar": MapInfo(
         "Miramar",

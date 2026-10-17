@@ -11,6 +11,7 @@ import json
 import queue
 import subprocess
 import threading
+import time
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Iterator
@@ -145,15 +146,18 @@ def iter_frames(
         proc.wait()
 
 
-def grab(url: str, t: float) -> np.ndarray | None:
-    """Single frame at time t (fast keyframe seek)."""
+def grab(url: str, t: float, retries: int = 3) -> np.ndarray | None:
+    """Single frame at time t (fast keyframe seek). Retries with backoff: YouTube
+    sometimes refuses bursts of parallel range requests."""
     ff = imageio_ffmpeg.get_ffmpeg_exe()
     cmd = [ff, "-loglevel", "error", "-nostdin", "-ss", f"{t:.3f}", "-i", url, "-frames:v", "1",
            "-vf", f"scale={WIDTH}:{HEIGHT}", "-f", "rawvideo", "-pix_fmt", "bgr24", "-"]
-    out = subprocess.run(cmd, capture_output=True).stdout
-    if len(out) < WIDTH * HEIGHT * 3:
-        return None
-    return np.frombuffer(out[: WIDTH * HEIGHT * 3], np.uint8).reshape(HEIGHT, WIDTH, 3)
+    for attempt in range(retries):
+        out = subprocess.run(cmd, capture_output=True).stdout
+        if len(out) >= WIDTH * HEIGHT * 3:
+            return np.frombuffer(out[: WIDTH * HEIGHT * 3], np.uint8).reshape(HEIGHT, WIDTH, 3)
+        time.sleep(1.5 * (attempt + 1))
+    return None
 
 
 def info_json(info: StreamInfo) -> str:
