@@ -1,9 +1,15 @@
+# python
+__pycache__/
+*.pyc
+.venv/
+.pytest_cache/
+*.egg-info/
+# node
 node_modules/
 dist/
+# data (videos, map art, db, debug output) - never committed
 data/
-.env
 *.log
-apps/api/public/
-coverage/
+.env
 .DS_Store
 .claude/
