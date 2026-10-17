@@ -45,9 +45,10 @@ def process_match(
     t1: float,
     on_progress: Callable[[float], None] | None = None,
     book: Book | None = None,
+    frames=None,
 ) -> dict:
+    """`frames`: optional iterable of source.Frame (tests / cached frames) instead of the URL."""
     P = profile.load(profile_name)
-    info = source.resolve(url)
     reg = Registrar()
     book = book or Book()
     map_name: str | None = None
@@ -56,9 +57,8 @@ def process_match(
     zones: list[db.ZoneObs] = []
     status: list[db.TeamStatus] = []
     pending: list[_Pending] = []
-    alive_last: dict[str, int] = {}
+    alive_hist: dict[str, list[tuple[float, int]]] = {}
     kills_last: dict[str, int] = {}
-    eliminated_at: dict[str, float] = {}
     stats = {"frames": 0, "map_frames": 0, "tags": 0, "assigned": 0}
     started = time.time()
 
@@ -71,7 +71,10 @@ def process_match(
         status.clear()
 
     i = 0
-    for fr in source.iter_frames(info.video_url, start=t0, end=t1):
+    if frames is None:
+        info = source.resolve(url)
+        frames = source.iter_frames(info.video_url, start=t0, end=t1)
+    for fr in frames:
         stats["frames"] += 1
         img = fr.image
         sc = scene.classify(img, P)
@@ -85,15 +88,15 @@ def process_match(
         if i % ROSTER_EVERY == 1 or not book.teams:
             rows = read_roster(img, L)
             if len(rows) >= 8:
-                book.set_teams([r.tag for r in rows])
-                for r in rows:
-                    status.append(db.TeamStatus(match_id=match_id, t=fr.t, team=r.tag, alive=r.alive, kills=r.kills))
+                canon = book.set_teams([r.tag for r in rows])
+                for r, tag in zip(rows, canon):
+                    if tag is None:
+                        continue
+                    status.append(db.TeamStatus(match_id=match_id, t=fr.t, team=tag, alive=r.alive, kills=r.kills))
                     if r.kills is not None:
-                        kills_last[r.tag] = r.kills
+                        kills_last[tag] = max(r.kills, kills_last.get(tag, 0))
                     if r.alive is not None:
-                        if r.alive == 0 and alive_last.get(r.tag, 4) > 0 and r.tag not in eliminated_at:
-                            eliminated_at[r.tag] = fr.t
-                        alive_last[r.tag] = r.alive
+                        alive_hist.setdefault(tag, []).append((fr.t, r.alive))
 
         res = reg.update(img, L)
         T = res.transform
@@ -141,6 +144,14 @@ def process_match(
             stats["assigned"] += 1
             obs.append(db.Observation(match_id=match_id, t=p.t, team=team, player=pl.name if pl else "", x=p.x, y=p.y, conf=p.conf))
     flush()
+
+    # elimination = first time alive bars read 0 and stayed 0 for the next two reads
+    eliminated_at: dict[str, float] = {}
+    for tag, hist in alive_hist.items():
+        for k in range(len(hist) - 2):
+            if hist[k][1] == 0 and hist[k + 1][1] == 0 and hist[k + 2][1] == 0:
+                eliminated_at[tag] = hist[k][0]
+                break
 
     # placements: survivors first, then reverse elimination order
     order = sorted(book.teams, key=lambda t: -(eliminated_at.get(t, 1e12)))

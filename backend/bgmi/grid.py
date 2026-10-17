@@ -56,7 +56,10 @@ def line_profiles(gray: np.ndarray, mask: np.ndarray | None = None) -> tuple[np.
     # white top-hat removes broad bright areas, keeps thin bright structures up to ~21 px wide
     th_v = cv2.morphologyEx(g, cv2.MORPH_TOPHAT, cv2.getStructuringElement(cv2.MORPH_RECT, (21, 1)))
     th_h = cv2.morphologyEx(g, cv2.MORPH_TOPHAT, cv2.getStructuringElement(cv2.MORPH_RECT, (1, 21)))
-    # keep only long structures: vertical lines survive a tall opening, horizontal a wide one
+    # bridge the gaps where crossing lines interrupt each other, then keep only long
+    # structures: vertical lines survive a tall opening, horizontal a wide one
+    th_v = cv2.morphologyEx(th_v, cv2.MORPH_CLOSE, cv2.getStructuringElement(cv2.MORPH_RECT, (1, 5)))
+    th_h = cv2.morphologyEx(th_h, cv2.MORPH_CLOSE, cv2.getStructuringElement(cv2.MORPH_RECT, (5, 1)))
     v = cv2.morphologyEx(th_v, cv2.MORPH_OPEN, cv2.getStructuringElement(cv2.MORPH_RECT, (1, 61)))
     h = cv2.morphologyEx(th_h, cv2.MORPH_OPEN, cv2.getStructuringElement(cv2.MORPH_RECT, (61, 1)))
     col = (v > 6).mean(axis=0)
@@ -134,7 +137,31 @@ def fit_period(
     if best is None:
         return None
     score, p, phx, phy, n = best
+    p, phx, phy = _refine(xs, ys, p, phx, phy)
     return GridFit(period=p, phase_x=phx, phase_y=phy, coherence=score, n_lines=n)
+
+
+def _refine(xs: np.ndarray, ys: np.ndarray, p: float, phx: float, phy: float) -> tuple[float, float, float]:
+    """Least-squares period + phases from inlier lines (position = phase + k * period)."""
+    rows, rhs = [], []
+    for a, ph, col in ((xs, phx, 1), (ys, phy, 2)):
+        if len(a) == 0:
+            continue
+        k = np.round((a - ph) / p)
+        d = np.abs(a - (ph + k * p))
+        for ki, ai in zip(k[d < max(2.0, 0.07 * p)], a[d < max(2.0, 0.07 * p)]):
+            r = [ki, 0.0, 0.0]
+            r[col] = 1.0
+            rows.append(r)
+            rhs.append(ai)
+    A = np.array(rows)
+    if len(A) < 4 or A[:, 1].sum() < 2 or A[:, 2].sum() < 2:
+        return p, phx, phy
+    sol, *_ = np.linalg.lstsq(A, np.array(rhs), rcond=None)
+    p2, px, py = map(float, sol)
+    if not 0.9 * p < p2 < 1.1 * p:
+        return p, phx, phy
+    return p2, px % p2, py % p2
 
 
 def detect(

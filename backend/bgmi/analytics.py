@@ -110,11 +110,16 @@ def zone_phases(zones: list[db.ZoneObs]) -> list[Phase]:
         cx, cy, r = np.median(arr, axis=0)
         phases.append(Phase(len(phases) + 1, g[0].t, g[-1].t, float(cx), float(cy), float(r)))
 
-    for z in whites:
+    def confirmed(i: int, z: db.ZoneObs) -> bool:
+        """A shrink is real only if the next two circles agree with it."""
+        nxt = whites[i + 1 : i + 3]
+        return len(nxt) == 2 and all(abs(n.r - z.r) < 0.15 * z.r and np.hypot(n.cx - z.cx, n.cy - z.cy) < 0.15 * z.r for n in nxt)
+
+    for i, z in enumerate(whites):
         if group:
             ref = np.median(np.array([[g.cx, g.cy, g.r] for g in group]), axis=0)
             moved = np.hypot(z.cx - ref[0], z.cy - ref[1])
-            if z.r < ref[2] * 0.85 and moved < ref[2]:
+            if z.r < ref[2] * 0.85 and moved < ref[2] and confirmed(i, z):
                 close(group)
                 group = []
             elif abs(z.r - ref[2]) > ref[2] * 0.15 or moved > ref[2] * 0.15:

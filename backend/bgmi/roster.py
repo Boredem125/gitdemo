@@ -154,11 +154,43 @@ class Book:
     pending: dict[str, list[tuple[str, np.ndarray]]] = field(default_factory=dict)
     aliases: dict[str, str] = field(default_factory=dict)  # folded name prefix -> team
 
-    def set_teams(self, tags: list[str]) -> None:
+    tag_votes: dict[str, int] = field(default_factory=dict)
+
+    def canonical_tag(self, tag: str) -> str | None:
+        """Map an OCR'd tag onto a known team ('8BIL' -> '8BIT', 'K92' -> 'K9')."""
+        if tag in self.teams:
+            return tag
+        f = fold(tag)
+        for t in self.teams:
+            ft = fold(t)
+            if ft == f:
+                return t
+            # one extra/garbled trailing glyph: 'K92' -> K9, '8BIL' -> 8BIT, 'WF7' -> WF
+            if len(f) == len(ft) + 1 and f.startswith(ft):
+                return t
+            if len(f) == len(ft) - 1 >= 2 and ft.startswith(f):  # dropped last glyph: '8BI'
+                return t
+            if len(f) == len(ft) >= 4 and f[:-1] == ft[:-1]:
+                return t
+        return None
+
+    def set_teams(self, tags: list[str]) -> list[str | None]:
+        """Feed one roster read. A tag becomes a team only after it was read in 2 roster
+        reads (one-off OCR misreads never become teams). Returns the canonical tag for
+        each input (None = not a known team yet)."""
+        out = []
+        self.max_rows = max(getattr(self, "max_rows", 0), len(tags))
         for t in tags:
-            if t not in self.teams:
-                self.teams.append(t)
-                self.colors.setdefault(t, [])
+            c = self.canonical_tag(t)
+            if c is None:
+                self.tag_votes[t] = self.tag_votes.get(t, 0) + 1
+                # roster frozen once it holds as many teams as the overlay shows rows
+                if self.tag_votes[t] >= 2 and len(self.teams) < self.max_rows:
+                    self.teams.append(t)
+                    self.colors.setdefault(t, [])
+                    c = t
+            out.append(c)
+        return out
 
     def team_color(self, team: str) -> np.ndarray | None:
         c = self.colors.get(team)
@@ -219,14 +251,15 @@ class Book:
         """Team (needed for analytics) and, when identifiable, the player."""
         col = np.array(color, np.float32)
         f = fold(name)
-        # 1. a known player spelled similarly
+        prefix_team, _ = self._by_prefix(name)
+        # 1. a known player spelled similarly (unless the name clearly carries another tag)
         known = max(self.players, key=lambda p: fuzz.ratio(fold(p.name), f), default=None)
-        if known is not None and fuzz.ratio(fold(known.name), f) >= 85:
+        if known is not None and fuzz.ratio(fold(known.name), f) >= 85 and prefix_team in (None, known.team):
             known.add(name)
             self.colors[known.team].append(col)
             return known.team, known
         # 2. team tag (or a learned alias) at the start of the name
-        team, score = self._by_prefix(name)
+        team = prefix_team
         if team is not None:
             self.colors[team].append(col)
             return team, self._match_player(team, name, create=True)

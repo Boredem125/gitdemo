@@ -7,15 +7,14 @@ import traceback
 from concurrent.futures import ProcessPoolExecutor, as_completed
 
 from . import db, profile, source
-from .scan import find_matches, sample_stream
+from .scan import scan
 
-SCAN_STEP = 20.0
 MATCH_WORKERS = int(os.environ.get("BGMI_MATCH_WORKERS", "3"))
 
 
 def _match_job(match_id: int, url: str, profile_name: str, t0: float, t1: float) -> dict:
     # each process: limit ONNX threads so parallel matches don't fight over cores
-    os.environ.setdefault("OMP_NUM_THREADS", "4")
+    os.environ.setdefault("BGMI_OCR_THREADS", str(max(2, (os.cpu_count() or 8) // MATCH_WORKERS)))
     from .process import process_match
 
     db.update(db.Match, match_id, status="processing")
@@ -49,8 +48,7 @@ def run_stream(stream_id: int) -> None:
         def scan_prog(p: float) -> None:
             db.update(db.Stream, stream_id, progress=round(0.2 * p, 3))
 
-        samples = sample_stream(info, P, step=SCAN_STEP, on_progress=scan_prog)
-        spans = find_matches(samples, SCAN_STEP)
+        spans = scan(info, P, on_progress=scan_prog)
         if not spans:
             db.update(db.Stream, stream_id, status="failed", error="No matches found in this stream (is it a map stream?)")
             return

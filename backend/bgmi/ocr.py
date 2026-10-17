@@ -7,6 +7,7 @@ fixed overlay boxes with detection, or already-located name tags with recognitio
 
 from __future__ import annotations
 
+import os
 from dataclasses import dataclass
 from functools import lru_cache
 
@@ -32,7 +33,14 @@ def engine():
 
     # default det config scales the *short* side up to 736 px, which makes thin strips huge;
     # cap the long side instead
-    return RapidOCR(det_limit_type="max", det_limit_side_len=1280)
+    # BGMI_OCR_THREADS caps ONNX threads per process when several matches run in parallel
+    threads = int(os.environ.get("BGMI_OCR_THREADS", "-1"))
+    return RapidOCR(
+        det_limit_type="max",
+        det_limit_side_len=1280,
+        intra_op_num_threads=threads,
+        inter_op_num_threads=1 if threads > 0 else -1,
+    )
 
 
 def read(img: np.ndarray, offset: tuple[int, int] = (0, 0), min_conf: float = 0.5) -> list[TextBox]:
