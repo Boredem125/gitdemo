@@ -8,7 +8,9 @@ team movement.
 from __future__ import annotations
 
 import json
+import queue
 import subprocess
+import threading
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Iterator
@@ -90,38 +92,35 @@ def iter_frames(
     keyframes_only: bool = True,
     fps: float | None = None,
 ) -> Iterator[Frame]:
-    """Yield frames between start and end.
+    """Yield frames between start and end with their stream timestamps.
 
-    Timestamps: with keyframes only we can't read exact pts from rawvideo, so we use
-    ffprobe-free estimation via a parallel `-show_entries` pass would be costly; instead
-    request pts through a second output (showinfo) is complex. We use `fps` for exact
-    spacing when given, else read pts from the stderr of `-vf showinfo`.
+    With `fps` the spacing is exact. Otherwise (keyframes) each frame's pts is read from
+    ffmpeg's `showinfo` filter on stderr, which a reader thread drains so neither pipe
+    can block the other.
     """
     ff_cmd = _ffmpeg_cmd(url, start, end, keyframes_only, fps)
     if fps is None:
-        # add showinfo to get pts_time for each emitted frame
         i = ff_cmd.index("-vf")
         ff_cmd[i + 1] = ff_cmd[i + 1] + ",showinfo"
         ff_cmd[2] = "info"  # loglevel info so showinfo prints
+        ff_cmd.insert(3, "-nostats")
     proc = subprocess.Popen(ff_cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, bufsize=WIDTH * HEIGHT * 3)
     frame_bytes = WIDTH * HEIGHT * 3
-    times: list[float] = []
+    pts_q: queue.Queue[float | None] = queue.Queue()
 
-    def read_pts() -> float | None:
-        # pull showinfo lines until we have one more timestamp
+    def drain() -> None:
         assert proc.stderr is not None
-        while len(times) == 0:
-            line = proc.stderr.readline()
-            if not line:
-                return None
-            s = line.decode("utf-8", "ignore")
-            if "pts_time:" in s:
-                v = s.split("pts_time:")[1].split()[0]
+        for raw in proc.stderr:
+            line = raw.decode("utf-8", "ignore")
+            if "pts_time:" in line:
                 try:
-                    times.append(float(v))
+                    pts_q.put(float(line.split("pts_time:")[1].split()[0]))
                 except ValueError:
                     pass
-        return times.pop(0)
+        pts_q.put(None)
+
+    if fps is None:
+        threading.Thread(target=drain, daemon=True).start()
 
     n = 0
     try:
@@ -134,7 +133,10 @@ def iter_frames(
             if fps:
                 t = start + n / fps
             else:
-                pts = read_pts()
+                try:
+                    pts = pts_q.get(timeout=30)
+                except queue.Empty:
+                    pts = None
                 t = start + (pts if pts is not None else n * 2.0)
             n += 1
             yield Frame(t=t, image=img)

@@ -189,7 +189,7 @@ def _major_phase(a: np.ndarray, h: np.ndarray, period: float, phase: float, sub:
     return float(phase + best * period)
 
 
-def snap(fit: GridFit, is_sub: bool, pred: Transform, sub: int = 10) -> Transform:
+def snap(fit: GridFit, is_sub: bool, pred: Transform, sub: int = 10, use_major: bool = True) -> Transform:
     """Snap a predicted transform onto the detected grid.
 
     Scale comes from the line period; each offset moves to the detected line phase nearest
@@ -200,7 +200,7 @@ def snap(fit: GridFit, is_sub: bool, pred: Transform, sub: int = 10) -> Transfor
 
     def snap_axis(o_pred: float, phase: float, major: float | None) -> float:
         # a visible 1 km line pins the offset exactly; the prediction only picks which km
-        if major is not None:
+        if use_major and major is not None:
             return major + round((o_pred - major) / s) * s
         k = round((o_pred - phase) / fit.period)
         return phase + k * fit.period
