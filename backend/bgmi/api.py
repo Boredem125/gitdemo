@@ -125,4 +125,12 @@ def map_image(name: str):
 # built frontend (npm run build -> frontend/dist)
 _dist = Path(__file__).resolve().parents[2] / "frontend" / "dist"
 if _dist.exists():
-    app.mount("/", StaticFiles(directory=_dist, html=True), name="web")
+    app.mount("/assets", StaticFiles(directory=_dist / "assets"), name="assets")
+
+    @app.get("/{path:path}", include_in_schema=False)
+    def spa(path: str):
+        """Client-side routes (/matches/3, /teams/WELT) all serve the SPA."""
+        f = _dist / path
+        if path and f.is_file():
+            return FileResponse(f)
+        return FileResponse(_dist / "index.html")
